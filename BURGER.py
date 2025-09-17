@@ -1,19 +1,7 @@
-
-import json
-import csv
-import os
 import time
 from datetime import datetime
 
-
-MENU_FILE = 'menu.json'       
-INVENTORY_FILE = 'inventory.json'
-LOYALTY_FILE = 'loyalty.json'
-SALES_FILE = 'sales.csv'
-
-TAX_RATE = 0.10                 # 10% example tax
-
-#  menu 
+TAX_RATE = 0.10
 DEFAULT_MENU = {
     'Cheeseburger': {
         'price': 4.99, 'category': 'burger',
@@ -28,16 +16,12 @@ DEFAULT_MENU = {
         'allergens': ['gluten'], 'gluten_free_available': False
     }
 }
-
-# Default toppings
 DEFAULT_TOPPINGS = {
     'Bacon': 0.75,
     'Extra Cheese': 0.50,
     'Onion Rings': 1.00,
     'GlutenFreeBun': 1.50
 }
-
-# Default inventory mapping (ingredient -> quantity)
 DEFAULT_INVENTORY = {
     'Cheeseburger_patty': 20,
     'Double_patty': 15,
@@ -48,55 +32,12 @@ DEFAULT_INVENTORY = {
     'Onion Rings': 15,
     'Fries+Drink': 10
 }
-
-# -----------------------
-# Load/init persistent files
-# -----------------------
-def load_json_default(path, default):
-    if os.path.exists(path):
-        try:
-            with open(path, 'r') as f:
-                return json.load(f)
-        except Exception:
-            return default
-    else:
-        # create file with default
-        with open(path, 'w') as f:
-            json.dump(default, f, indent=2)
-        return default
-
-beef_burgers = load_json_default(MENU_FILE, DEFAULT_MENU)
-toppings = DEFAULT_TOPPINGS.copy() 
-inventory = load_json_default(INVENTORY_FILE, DEFAULT_INVENTORY)
-
-if os.path.exists(LOYALTY_FILE):
-    try:
-        with open(LOYALTY_FILE, 'r') as f:
-            LOYALTY_DB = json.load(f)
-    except Exception:
-        LOYALTY_DB = {}
-else:
-    LOYALTY_DB = {}
-    with open(LOYALTY_FILE, 'w') as f:
-        json.dump(LOYALTY_DB, f, indent=2)
-
-# In-memory order and state
-ordered_items = []   # list of dicts: {name, qty, unit_price, toppings, GF, notes}
+beef_burgers = DEFAULT_MENU.copy()
+toppings = DEFAULT_TOPPINGS.copy()
+inventory = DEFAULT_INVENTORY.copy()
+LOYALTY_DB = {}
+ordered_items = []
 loyalty_id = None
-
-
-def save_json(path, data):
-    with open(path, 'w') as f:
-        json.dump(data, f, indent=2)
-
-def append_csv_sales(order_no, items, subtotal, discount, tax, total):
-    write_header = not os.path.exists(SALES_FILE)
-    with open(SALES_FILE, 'a', newline='') as f:
-        writer = csv.writer(f)
-        if write_header:
-            writer.writerow(['order_no', 'timestamp', 'items_summary', 'subtotal', 'discount', 'tax', 'total'])
-        items_summary = ';'.join([f"{e['qty']}x{e['name']}" for e in items])
-        writer.writerow([order_no, datetime.now().isoformat(), items_summary, f"{subtotal:.2f}", f"{discount:.2f}", f"{tax:.2f}", f"{total:.2f}"])
 
 def get_valid_int(prompt, allow_zero=False):
     while True:
@@ -133,36 +74,27 @@ def generate_pickup_code(order_no):
         f.write(code)
     return code, fname
 
-# -----------------------
-# Inventory - mapping recipe to ingredients (simplified)
-# -----------------------
 def recipe_ingredients(item_name, qty, toppings_list, gf_flag):
     req = {}
-    # patties
     if 'Double' in item_name:
         req['Double_patty'] = qty
     else:
         req['Cheeseburger_patty'] = qty
-    # bun type
     if gf_flag:
         req['GlutenFreeBun'] = qty
     else:
         req['Bun'] = qty
-    # toppings: assume one topping per burger unless user chooses otherwise
     for t in toppings_list:
-        # map topping string to inventory key; basic mapping uses topping name
         key = t
-        # handle common mismatch like 'Extra Cheese' -> 'Extra Cheese' key
         req[key] = req.get(key, 0) + qty
     return req
 
-def check_inventory_and_reserve(item_name, qty, toppings_list, gf_flag):
+def chkinvresv(item_name, qty, toppings_list, gf_flag):
     required = recipe_ingredients(item_name, qty, toppings_list, gf_flag)
     for ingredient, need in required.items():
         have = inventory.get(ingredient, 0)
         if have < need:
             return False, ingredient
-    # reserve
     for ingredient, need in required.items():
         inventory[ingredient] = inventory.get(ingredient, 0) - need
     return True, None
@@ -178,19 +110,15 @@ def adjust_inventory_for_quantity_change(entry, new_qty):
     if diff == 0:
         return True, None
     if diff > 0:
-        ok, missing = check_inventory_and_reserve(entry['name'], diff, entry['toppings'], entry['GF'])
+        ok, missing = chkinvresv(entry['name'], diff, entry['toppings'], entry['GF'])
         if not ok:
             return False, missing
         return True, None
     else:
-        # restore (-diff)
         restore_entry = {'name': entry['name'], 'qty': -diff, 'toppings': entry['toppings'], 'GF': entry['GF']}
         restore_inventory_for(restore_entry)
         return True, None
 
-# -----------------------
-# Menu and display
-# -----------------------
 def menu():
     print("\n--- Beef Burger Menu ---")
     i = 1
@@ -205,7 +133,6 @@ def menu():
     print("R. Remove / Edit cart")
     print("L. Loyalty / Enter ID")
     print("C. Checkout")
-    print("A. Admin (password) [demo only]")
     print("Q. Quit")
 
 def show_toppings():
@@ -214,9 +141,6 @@ def show_toppings():
         print(f"- {t}: {format_currency(p)}")
     print()
 
-# -----------------------
-# Cart operations
-# -----------------------
 def cart_subtotal():
     return sum(e['qty'] * e['unit_price'] for e in ordered_items)
 
@@ -259,9 +183,6 @@ def edit_cart():
         entry['qty'] = new_qty
         print("Quantity updated.")
 
-# -----------------------
-# Add item flow
-# -----------------------
 def add_item_flow(item_num):
     names = list(beef_burgers.keys())
     if item_num < 1 or item_num > len(names):
@@ -276,7 +197,6 @@ def add_item_flow(item_num):
         if gf_choice == 'Y':
             gf_flag = True
             base_price += toppings.get('GlutenFreeBun', 0.0)
-    # toppings selection
     chosen_toppings = []
     show_toppings()
     while True:
@@ -290,7 +210,7 @@ def add_item_flow(item_num):
         else:
             print("Invalid topping name. Try again or press Enter to finish.")
     notes = input("Any notes (e.g., no onion)? Press Enter to skip: ").strip()
-    ok, missing = check_inventory_and_reserve(name, qty, chosen_toppings, gf_flag)
+    ok, missing = chkinvresv(name, qty, chosen_toppings, gf_flag)
     if not ok:
         print(f"Sorry, insufficient {missing}. Try smaller qty or different item.")
         return
@@ -304,8 +224,6 @@ def add_item_flow(item_num):
     }
     ordered_items.append(entry)
     print(f"Added {qty} x {name} to cart.")
-
-    # upsell suggestion (if any burger present)
     burger_list = [k for k,v in beef_burgers.items() if v.get('category') == 'burger']
     if any(e['name'] in burger_list for e in ordered_items):
         upsell = get_choice("Deal suggestion: Add Fries + Drink for $3 extra (Y/N)? ", ['Y','N'])
@@ -317,22 +235,19 @@ def add_item_flow(item_num):
             else:
                 print("Sorry, Fries+Drink is out of stock.")
 
-# -----------------------
-# Specials & totals
-# -----------------------
 def compute_pair_savings(pairs):
     burger_prices = []
     for e in ordered_items:
         if beef_burgers.get(e['name'], {}).get('category') == 'burger':
             burger_prices.extend([e['unit_price']] * e['qty'])
-    burger_prices.sort()  # cheapest first
+    burger_prices.sort()
     savings = 0.0
     for i in range(pairs):
         if len(burger_prices) >= 2:
             p1 = burger_prices.pop(0)
             p2 = burger_prices.pop(0)
             normal = p1 + p2
-            savings += max(0.0, normal - 10.0)  # bundle price $10
+            savings += max(0.0, normal - 10.0)
     return savings
 
 def apply_specials_and_bundles(subtotal):
@@ -343,9 +258,6 @@ def apply_specials_and_bundles(subtotal):
         subtotal -= savings
     return subtotal
 
-# -----------------------
-# Loyalty & discounts
-# -----------------------
 def handle_loyalty_and_discounts(subtotal):
     discount = 0.0
     global loyalty_id
@@ -361,13 +273,9 @@ def handle_loyalty_and_discounts(subtotal):
             if use == 'Y':
                 discount += 5.0
                 LOYALTY_DB[loyalty_id] = points - 100
-                save_json(LOYALTY_FILE, LOYALTY_DB)
                 print("100 points redeemed for $5 off.")
     return discount
 
-# -----------------------
-# Checkout
-# -----------------------
 def checkout():
     global ordered_items, loyalty_id
     if not ordered_items:
@@ -389,55 +297,15 @@ def checkout():
     if confirm == 'R':
         edit_cart()
         return
-    # finalize payment
     order_no = generate_order_no()
     code, fname = generate_pickup_code(order_no)
-    append_csv_sales(order_no, ordered_items, subtotal, discount, tax, total)
     if loyalty_id:
         earned = int(total)
         LOYALTY_DB[loyalty_id] = LOYALTY_DB.get(loyalty_id, 0) + earned
-        save_json(LOYALTY_FILE, LOYALTY_DB)
         print(f"Earned {earned} loyalty points.")
-    save_json(INVENTORY_FILE, inventory)  # persist inventory changes
     print(f"Order #{order_no} paid. Pickup code: {code} (saved to {fname})")
     ordered_items = []
 
-# -----------------------
-# Admin
-# -----------------------
-def admin_mode():
-    pwd = input("Enter admin password (demo): ").strip()
-    if pwd != ADMIN_PASSWORD:
-        print("Wrong password.")
-        return
-    print("--- ADMIN MODE ---")
-    print("1. Show inventory")
-    print("2. Refill inventory key")
-    print("3. View sales CSV file (raw)")
-    print("4. Save current menu to JSON")
-    ch = get_choice("Choose: ", ['1','2','3','4'])
-    if ch == '1':
-        print(json.dumps(inventory, indent=2))
-    elif ch == '2':
-        key = input("Inventory key to refill (exact key): ").strip()
-        qty = get_valid_int("Amount to add: ", allow_zero=False)
-        inventory[key] = inventory.get(key, 0) + qty
-        save_json(INVENTORY_FILE, inventory)
-        print(f"Refilled {key} by {qty}.")
-    elif ch == '3':
-        if os.path.exists(SALES_FILE):
-            print("--- Sales CSV content ---")
-            with open(SALES_FILE,'r') as f:
-                print(f.read())
-        else:
-            print("No sales recorded yet.")
-    else:
-        save_json(MENU_FILE, beef_burgers)
-        print("Menu saved to", MENU_FILE)
-
-# -----------------------
-# Main program loop
-# -----------------------
 def main():
     global loyalty_id
     print("Welcome to the Beef Burger Co. menu!")
@@ -460,25 +328,18 @@ def main():
                 loyalty_id = lid
                 if lid not in LOYALTY_DB:
                     LOYALTY_DB[lid] = 0
-                    save_json(LOYALTY_FILE, LOYALTY_DB)
                 print(f"Loyalty ID set: {loyalty_id}")
             continue
         if action.upper() == 'C':
             checkout()
             continue
-        if action.upper() == 'A':
-            admin_mode()
-            continue
         if action.upper() == 'Q':
             print("Exiting. Goodbye!")
             break
-        # assume numeric item selection
         try:
             item_num = int(action)
             add_item_flow(item_num)
         except ValueError:
             print("Invalid input. Try again.")
-
-# Entry point
 if __name__ == '__main__':
     main()
