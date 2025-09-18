@@ -262,9 +262,12 @@ def handle_loyalty_and_discounts(subtotal):
     discount = 0.0
     global loyalty_id
     code = input("Discount code (press Enter to skip): ").strip()
-    if code.lower() == "birthday!":
-        discount += 0.10 * subtotal
-        print("Birthday! code applied: 10% off.")
+    if code:
+        if code.upper() == "DISCOUNT10":
+            discount += 0.10 * subtotal
+            print("10% discount code applied.")
+        else:
+            print("Invalid discount code. No discount applied.")
     if loyalty_id:
         points = LOYALTY_DB.get(loyalty_id, 0)
         print(f"Loyalty points: {points}")
@@ -302,7 +305,7 @@ def checkout():
     if loyalty_id:
         earned = int(total)
         LOYALTY_DB[loyalty_id] = LOYALTY_DB.get(loyalty_id, 0) + earned
-        print(f"Earned {earned} loyalty points.")
+        print(f"Earned {earned} loyalty points. Total: {LOYALTY_DB[loyalty_id]}")
     print(f"Order #{order_no} paid. Pickup code: {code} (saved to {fname})")
     ordered_items = []
 
